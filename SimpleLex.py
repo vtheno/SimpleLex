@@ -116,12 +116,14 @@ class Parsing:
                 if a == x.key:
                     return [(a,toks)]
                 else:
-                    raise SyntaxErrors(str(a))
+                    raise SyntaxErrors ("error: " +  str(x))
             else:
                 raise SyntaxErrors ("Symbol excepted")
         return ckey
     def empty (self,toks):#right it's Parsec fail or zero
-        return ([ ],toks)
+        #return self.mreturn( [ ] )(toks)
+        #return ([ ],toks)
+        return [ ]
     def Or(self,ph1,ph2):# right || 0 it's Parsec || or ++ or Alt or "Or"
         def curryOr(toks):
             try:
@@ -145,6 +147,7 @@ class Parsing:
                 temp.append( func(*now) )
             except Exception,e:
                 print e,type(e),e.args
+                #temp.append( func(now) )
             finally:
                 lst = lst[1:]
         else:
@@ -152,6 +155,7 @@ class Parsing:
     def bind(self,p,f):
         def bind__(inp):
             temp = p (inp)
+            #print "bind:",temp
             return self.concat ( self.fmap (self.uncurry(f),temp))
         return bind__
     def mreturn(self,v):
@@ -167,8 +171,10 @@ class Parsing:
             tmp = self.Lex.scan(a)
             value = ph (tmp)
             #print type(value),value
+            if value == [ ]:
+                raise SyntaxErrors ("Extra characters is phrase")
+            print "value:",value
             x,xs = value[0]
-            #print "value:",value
             if xs == []:
                 return x
             else:
@@ -215,9 +221,9 @@ def test2():
     mlam = functor_Lexical(Key)
     p = Parsing(mlam)
     def atom(toks):
-        return p.Or(p.id,p.key("_"))(toks)
+        return p.id(toks)
     def var(toks):
-        return p.bind(atom,lambda x: p.mreturn(Var(x) ))(toks)
+        return p.bind(atom,lambda x: p.mreturn( Var(x) ))(toks)
     def lam(toks):
         tmp = p.bind( p.key("\\"),
                       lambda _ : p.bind(atom,
@@ -229,13 +235,14 @@ def test2():
     def app(toks):
         tmp = p.bind(p.key("("),
                      lambda _ : p.bind(expr,
-                        lambda t1 : p.bind (expr,
-                        lambda t2 : p.bind (p.key(")"),
-                                       lambda _ : p.mreturn ( App(t1,t2) )))))
+                    lambda t1 : p.bind (expr,
+                    lambda t2 : p.bind (p.key(")"),
+                    lambda _ : p.mreturn ( (t1,t2) )))))
                                   
         return tmp(toks)
     def expr(toks):
-        return p.Or(p.Or(var,p.Or(lam,app)),p.empty)(toks)
+        #return p.Or(var,p.Or(lam,app))(toks)
+        return p.Or(var,p.Or(lam,app))(toks)
     def read(string):
         return p.reader(expr)(string)
     print var(mlam.scan(" abc "))
@@ -251,12 +258,63 @@ def test2():
     print p.reader(expr)(" ( (a b) ( \\ a -> a b)) ")
     while 1:
         try:
-            tmp = mlam.scan(raw_input("\n>> "))
+            inp = raw_input("\n>> ")
+            tmp = mlam.scan(inp)
             print tmp
-            print "=>",expr(tmp)
+            print "=>",read(inp)
         except Exception,e:
             print e
             continue
+
+def test3():
+    # datatype Expr = Let of string * Expr * Expr
+    #               | Var of string
+    class Expr: pass
+    class ExprValue(Expr): pass
+    class Var(ExprValue):
+        def __init__(self,v):
+            self.v = v
+        def __repr__(self):
+            return "(Var {})".format(self.v)
+    class Let(ExprValue):
+        def __init__(self,name,t1,t2):
+            self.name = name
+            self.t1 = t1
+            self.t2 = t2
+        def __repr__(self):
+            return "(Let {} = {} in {})".format(self.name,self.t1,self.t2)
+
+    class keyword(KeyWord):
+        @classmethod
+        def alphas(self):
+            return ["let","in"]
+        @classmethod
+        def symbols(self):
+            return ["="]
+    key = functor_Lexical(keyword)
+    p = Parsing(key)
+    def var(toks):
+        return p.bind(p.id,lambda v : p.mreturn(Var(v)) )(toks)
+    def let(toks):
+        return p.bind(p.key("let"),
+                      lambda _ : p.bind(p.id,
+                    lambda name : p.bind(p.key("="),
+                        lambda _ : p.bind(expr,
+                        lambda t1 : p.bind(p.key("in"),
+                        lambda _  : p.bind(expr,
+                        lambda t2 : p.mreturn ( Let (name,t1,t2) )))))))(toks)
+    def expr(toks):
+        return p.Or ( var,let )(toks)
+    def read(inp):
+        return p.reader(expr)(inp)
+    tmp = read("""let a = b in
+                  let c = a in 
+                  let d = let e = f in e
+                  in d
+                  """)
+    print tmp
+    #print read("let a in b")
 if __name__ == '__main__':
     #test1()
-    test2()
+    #test2()
+    test3()
