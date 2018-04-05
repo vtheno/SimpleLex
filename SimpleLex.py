@@ -165,7 +165,27 @@ class Parsing:
     def seq(self,p,q):
         return self.bind(p,lambda v : self.bind(q,lambda w : self.mreturn((v,w))))
     def many(self,p):
-        return self.Or(bind(p)(lambda x:bind(many(p))(lambda xs: mreturn ([x]+xs) )))(mreturn([]))
+        return self.Or(
+            self.bind(p,lambda x:
+            self.bind(self.many(p),lambda xs: self.mreturn ([x]+xs) )),
+            self.mreturn([ ]))
+    def chainl1(self,p,op):
+        def rest(x):
+            #print "rest x:",x,type(x)
+            return self.Or(
+                self.bind(op,lambda f:
+                self.bind(p,lambda y :
+                          rest(f(x,y))
+                          ))
+                ,
+                self.mreturn(x))
+        return self.bind(p,rest)
+    def chainr1(self,p,op):
+        return self.bind(p,lambda x :
+                self.Or(self.bind(op,lambda f:
+                        self.bind( self.chainr1(p,op) ,lambda y:
+                        self.mreturn ( f (x,y) ))),
+                        self.mreturn( x )) )
     def reader(self,ph): # right
         def cR(a):
             tmp = self.Lex.scan(a)
@@ -173,7 +193,7 @@ class Parsing:
             #print type(value),value
             if value == [ ]:
                 raise SyntaxErrors ("Extra characters is phrase")
-            print "value:",value
+            #print "value:",value
             x,xs = value[0]
             if xs == []:
                 return x
@@ -276,6 +296,8 @@ def test3():
             self.v = v
         def __repr__(self):
             return "(Var {})".format(self.v)
+        def eval(self,env):
+            return env.get(self.v)
     class Let(ExprValue):
         def __init__(self,name,t1,t2):
             self.name = name
@@ -283,11 +305,15 @@ def test3():
             self.t2 = t2
         def __repr__(self):
             return "(Let {} = {} in {})".format(self.name,self.t1,self.t2)
-
+        def eval(self,outEnv):
+            env = {}
+            tmp = self.t1.eval(outEnv)
+            env[self.name] = tmp
+            return self.t2.eval(env)
     class keyword(KeyWord):
         @classmethod
         def alphas(self):
-            return ["let","in"]
+            return ["val","let","in"]
         @classmethod
         def symbols(self):
             return ["="]
@@ -309,12 +335,78 @@ def test3():
         return p.reader(expr)(inp)
     tmp = read("""let a = b in
                   let c = a in 
-                  let d = let e = f in e
+                  let d = let e = c in e
                   in d
                   """)
     print tmp
+    vara = read("""let a = b in 
+                    let c = a in c""")
+    print vara
+    env = {"b":233}
+    print vara.eval(env)
     #print read("let a in b")
+    print tmp.eval(env)
+
+def testNumber():
+    class Kw(KeyWord):
+        @classmethod
+        def alphas(self):
+            return [ ]
+        @classmethod
+        def symbols(self):
+            return ["+"]
+    key = functor_Lexical(Kw)
+    p = Parsing(key)
+    class Expr: pass
+    class Const(Expr):
+        def __init__(self,i):
+            self.i = i
+        def __repr__(self):
+            return "{}".format(repr(self.i))#"(Const {})".format(repr(self.i))
+        def eval(self):
+            return self.i
+    class Plus(Expr):
+        def __init__(self,e1,e2):
+            self.e1 = e1
+            self.e2 = e2
+        def __repr__(self):
+            return "({} + {})".format(self.e1,self.e2)
+        def eval(self):
+            return self.e1.eval() + self.e2.eval()
+    def vv(v):
+        #print "vv:",v
+        if v.isdigit():
+            return p.mreturn(Const(int(v)))
+        return p.empty(v)
+    def const(toks):
+        #print toks
+        return p.bind(p.id,vv)(toks)
+    def plus(toks):
+        return p.bind(const,lambda e1 :
+                p.bind(p.key("+"),lambda _ :
+                p.bind(const,lambda e2: p.mreturn( Plus (e1,e2) ))))(toks)
+    def more_plus(toks):
+        return p.many(plus)(toks)
+    def adop(v):
+        #print "adop:",v
+        return p.mreturn( Plus )#lambda a,b:a + b )
+    def addop(toks):
+        #print "addop:",toks
+        return p.bind(p.key("+"),adop)(toks)
+    def adds(toks):
+        return p.chainl1(const,addop)(toks) # like foldl
+        return p.chainr1(const,addop)(toks) # like foldr 
+    def read(inp):
+        #return p.reader(more_plus)(inp)
+        return p.reader(adds)(inp)
+    #print read("1+2 3+4")#.eval()
+    # print read("1+2+3+4+5") # there need chinal or chainr
+    print read("1+2+3+4+5+6+7+8+9+10+11+12+13+14+15")#.eval()
+    #print reduce(lambda a,b:(a,b),range(2,16),1) 
+    # python reduce is foldl 
+    # but in scheme fold is foldl ,reduce is foldr 
 if __name__ == '__main__':
     #test1()
     #test2()
-    test3()
+    #test3()
+    testNumber()
